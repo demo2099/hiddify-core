@@ -69,6 +69,78 @@ func filterDeprecatedDNSOutbounds(jsonObj map[string]interface{}) map[string]int
 	return jsonObj
 }
 
+func filterDeprecatedECHOptions(jsonObj map[string]interface{}) map[string]interface{} {
+	removeDeprecatedECH := func(tlsObj map[string]interface{}) {
+		if ech, ok := tlsObj["ech"].(map[string]interface{}); ok {
+			changed := false
+			if _, ok := ech["pq_signature_schemes_enabled"]; ok {
+				delete(ech, "pq_signature_schemes_enabled")
+				changed = true
+			}
+			if _, ok := ech["dynamic_record_sizing_disabled"]; ok {
+				delete(ech, "dynamic_record_sizing_disabled")
+				changed = true
+			}
+			if changed {
+				fmt.Printf("[SingboxParser] stripped deprecated ECH options\n")
+			}
+		}
+	}
+
+	processOutbound := func(m map[string]interface{}) {
+		if tls, ok := m["tls"].(map[string]interface{}); ok {
+			removeDeprecatedECH(tls)
+		}
+	}
+
+	if outbounds, ok := jsonObj["outbounds"].([]interface{}); ok {
+		for _, ob := range outbounds {
+			if m, ok := ob.(map[string]interface{}); ok {
+				processOutbound(m)
+			}
+		}
+	}
+	if inbounds, ok := jsonObj["inbounds"].([]interface{}); ok {
+		for _, ib := range inbounds {
+			if m, ok := ib.(map[string]interface{}); ok {
+				if tls, ok := m["tls"].(map[string]interface{}); ok {
+					removeDeprecatedECH(tls)
+				}
+			}
+		}
+	}
+	return jsonObj
+}
+
+func deduplicateOutboundTags(jsonObj map[string]interface{}) map[string]interface{} {
+	if outbounds, ok := jsonObj["outbounds"].([]interface{}); ok {
+		tagCount := make(map[string]int)
+		for _, ob := range outbounds {
+			if m, ok := ob.(map[string]interface{}); ok {
+				if tag, ok := m["tag"].(string); ok {
+					tagCount[tag]++
+				}
+			}
+		}
+		seen := make(map[string]int)
+		for _, ob := range outbounds {
+			if m, ok := ob.(map[string]interface{}); ok {
+				if tag, ok := m["tag"].(string); ok {
+					if tagCount[tag] > 1 {
+						seen[tag]++
+						if seen[tag] > 1 {
+							newTag := fmt.Sprintf("%s_%d", tag, seen[tag])
+							fmt.Printf("[SingboxParser] dedup tag %q -> %q\n", tag, newTag)
+							m["tag"] = newTag
+						}
+					}
+				}
+			}
+		}
+	}
+	return jsonObj
+}
+
 func parseConfigContent(ctx context.Context, content []byte, debug bool, configOpt *HiddifyOptions, fullConfig bool) (*option.Options, error) {
 	if configOpt == nil {
 		configOpt = DefaultHiddifyOptions()
@@ -102,6 +174,8 @@ func parseConfigContent(ctx context.Context, content []byte, debug bool, configO
 		}
 
 		jsonObj = filterDeprecatedDNSOutbounds(jsonObj)
+		jsonObj = filterDeprecatedECHOptions(jsonObj)
+		jsonObj = deduplicateOutboundTags(jsonObj)
 
 		newContent, _ := json.MarshalIndent(jsonObj, "", "  ")
 
@@ -153,7 +227,6 @@ func patchConfigOptions(ctx context.Context, options *option.Options, name strin
 			if err != nil {
 				return nil, fmt.Errorf("[Warp] patch warp error: %w", err)
 			}
-			// options.Outbounds[i] = base
 			return &out, nil
 		})
 	}
@@ -165,8 +238,40 @@ func patchConfigOptions(ctx context.Context, options *option.Options, name strin
 		}
 	}
 
-	// fmt.Printf("%s\n", content)
+	stripDeprecatedECHFromOptions(options)
+
 	return validateResult(ctx, options, name)
+}
+
+func stripDeprecatedECHFromOptions(options *option.Options) {
+	stripECH := func(tlsContainer option.OutboundTLSOptionsContainer) {
+		if tls := tlsContainer.TLS; tls != nil && tls.ECH != nil {
+			tls.ECH.PQSignatureSchemesEnabled = false
+			tls.ECH.DynamicRecordSizingDisabled = false
+		}
+	}
+	for i := range options.Outbounds {
+		ob := &options.Outbounds[i]
+		if ob.Options == nil {
+			continue
+		}
+		switch o := ob.Options.(type) {
+		case *option.TrojanOutboundOptions:
+			stripECH(o.OutboundTLSOptionsContainer)
+		case *option.VLESSOutboundOptions:
+			stripECH(o.OutboundTLSOptionsContainer)
+		case *option.VMessOutboundOptions:
+			stripECH(o.OutboundTLSOptionsContainer)
+		case *option.HysteriaOutboundOptions:
+			stripECH(o.OutboundTLSOptionsContainer)
+		case *option.Hysteria2OutboundOptions:
+			stripECH(o.OutboundTLSOptionsContainer)
+		case *option.TUICOutboundOptions:
+			stripECH(o.OutboundTLSOptionsContainer)
+		case *option.AnyTLSOutboundOptions:
+			stripECH(o.OutboundTLSOptionsContainer)
+		}
+	}
 }
 
 func validateResult(ctx context.Context, options *option.Options, name string) (*option.Options, error) {
