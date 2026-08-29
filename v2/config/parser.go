@@ -51,6 +51,24 @@ func ParseConfigBytes(ctx context.Context, opt *ReadOptions, debug bool, configO
 	return options.MarshalJSONContext(ctx)
 
 }
+
+func filterDeprecatedDNSOutbounds(jsonObj map[string]interface{}) map[string]interface{} {
+	if outbounds, ok := jsonObj["outbounds"].([]interface{}); ok {
+		filtered := make([]interface{}, 0, len(outbounds))
+		for _, ob := range outbounds {
+			if m, ok := ob.(map[string]interface{}); ok {
+				if t, ok := m["type"].(string); ok && t == "dns" {
+					fmt.Printf("[SingboxParser] filtering deprecated dns outbound tag=%v\n", m["tag"])
+					continue
+				}
+			}
+			filtered = append(filtered, ob)
+		}
+		jsonObj["outbounds"] = filtered
+	}
+	return jsonObj
+}
+
 func parseConfigContent(ctx context.Context, content []byte, debug bool, configOpt *HiddifyOptions, fullConfig bool) (*option.Options, error) {
 	if configOpt == nil {
 		configOpt = DefaultHiddifyOptions()
@@ -82,6 +100,8 @@ func parseConfigContent(ctx context.Context, content []byte, debug bool, configO
 		} else {
 			return nil, fmt.Errorf("[SingboxParser] Incorrect Json Format")
 		}
+
+		jsonObj = filterDeprecatedDNSOutbounds(jsonObj)
 
 		newContent, _ := json.MarshalIndent(jsonObj, "", "  ")
 
