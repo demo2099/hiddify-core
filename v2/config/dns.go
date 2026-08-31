@@ -446,6 +446,9 @@ func getDNSServerOptions(tag string, dnsurl string, domain_resolver string, deto
 		}
 	case C.DNSTypeTLS, C.DNSTypeQUIC:
 		o.Type = serverType
+		// Bound the TLS connect so an unreachable DoT/DoQ resolver fails fast
+		// instead of hanging the lookup (and every dependent handshake) forever.
+		remoteOptions.ConnectTimeout = badoption.Duration(5 * time.Second)
 		if serverURL == nil {
 			return nil, E.New("invalid server address")
 		}
@@ -462,6 +465,12 @@ func getDNSServerOptions(tag string, dnsurl string, domain_resolver string, deto
 		}
 	case C.DNSTypeHTTPS, C.DNSTypeHTTP3:
 		o.Type = serverType
+		// Bound the TLS connect on the direct HTTPS DoH resolver. Without this,
+		// an ECH config-list lookup routed to `dns-trick-direct` (the ECH
+		// deadlock fix) can hang indefinitely when the DoH server is
+		// unreachable, stalling the node instead of letting it fall back to a
+		// stale-but-usable cached config or no ECH at all.
+		remoteOptions.ConnectTimeout = badoption.Duration(5 * time.Second)
 		httpsOptions := option.RemoteHTTPSDNSServerOptions{
 			RemoteTLSDNSServerOptions: option.RemoteTLSDNSServerOptions{
 				RemoteDNSServerOptions: remoteOptions,

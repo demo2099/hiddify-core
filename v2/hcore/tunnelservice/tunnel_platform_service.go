@@ -31,6 +31,11 @@ func (m *hiddifyNext) StartTunnelGrpcServer(listenAddressG string) (*grpc.Server
 
 	log.Printf("Server listening on %s", listenAddressG)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[tunnelservice] tunnel grpc Serve panic recovered: %v", r)
+			}
+		}()
 		if err := s.Serve(lis); err != nil {
 			log.Printf("failed to serve: %v", err)
 		}

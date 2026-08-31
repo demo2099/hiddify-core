@@ -2,6 +2,7 @@ package tunnelservice
 
 import (
 	"context"
+	"log"
 	"net/netip"
 	"os"
 	"time"
@@ -133,6 +134,13 @@ func (s *TunnelService) Exit(ctx context.Context, _ *hcommon.Empty) (*TunnelResp
 		s.box.CloseService()
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// This goroutine only waits then exits; a panic here is
+				// unexpected, but never let it reach the gomobile runtime.
+				log.Printf("[tunnelservice] Exit delay panic recovered: %v", r)
+			}
+		}()
 		<-time.After(time.Second * 1)
 		os.Exit(0)
 	}()

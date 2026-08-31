@@ -45,6 +45,9 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) err
 	})
 	if params.Debug {
 		go func() {
+			defer config.DeferPanicToError("grpc-pprof", func(e error) {
+				Log(LogLevel_ERROR, LogType_CORE, e.Error())
+			})
 			http.ListenAndServe("localhost:6060", nil)
 		}()
 	}
@@ -151,6 +154,9 @@ func StartGrpcServer(listenAddressG string, service string) (*grpc.Server, error
 	}
 	log.Info("Server listening on %s", listenAddressG)
 	go func() {
+		defer config.DeferPanicToError("grpc-serve", func(e error) {
+			Log(LogLevel_ERROR, LogType_CORE, e.Error())
+		})
 		if err := s.Serve(lis); err != nil {
 			log.Error("failed to serve: %v", err)
 		}
