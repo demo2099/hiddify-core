@@ -305,8 +305,74 @@ func addForceDirect(options *option.Options, hopt *HiddifyOptions) ([]option.Def
 		// 	},
 		// )
 	}
+
+	// ECH nodes whose config list is resolved via DNS (no inline `ech.config`)
+	// must perform their HTTPS-record lookup through a DIRECT resolver. If we
+	// let them fall through to the proxy-backed `final` server, the lookup is
+	// routed back into the very outbound being established (detour `select`),
+	// hangs on the proxy dial, and serializes every other ECH handshake behind
+	// one mutex inside sing-box's ECHClientConfig (observed: 9 goroutines stuck
+	// for minutes, node never gets latency and cannot connect). `dns-trick-direct`
+	// is a direct (non-proxy) fragmented DoH resolver, so it resolves reliably
+	// without depending on the proxy.
+	echDomains := collectOutboundECHDomains(options)
+	if len(echDomains) > 0 {
+		forceDirectRules = append(forceDirectRules,
+			option.DefaultDNSRule{
+				RawDefaultDNSRule: option.RawDefaultDNSRule{
+					Domain: echDomains,
+				},
+				DNSRuleAction: option.DNSRuleAction{
+					Action: C.RuleActionTypeRoute,
+					RouteOptions: option.DNSRouteActionOptions{
+						// Direct (non-proxy) resolver so the ECH HTTPS lookup
+						// cannot deadlock on the proxy it is meant to serve.
+						Server:         DNSTricksDirectTag,
+						Strategy:       hopt.DirectDnsDomainStrategy,
+						RewriteTTL:     &DEFAULT_DNS_TTL,
+						BypassIfFailed: false,
+					},
+				},
+			},
+		)
+	}
 	return forceDirectRules, nil
 
+}
+
+// collectOutboundECHDomains returns the DNS names sing-box must query to obtain
+// the ECH config list for every outbound that enables ECH without an inline
+// config. sing-box queries `ech.query_server_name` when set, otherwise the
+// outbound's TLS `server_name` (SNI).
+func collectOutboundECHDomains(options *option.Options) []string {
+	seen := make(map[string]bool)
+	var domains []string
+	add := func(d string) {
+		if d == "" {
+			return
+		}
+		if seen[d] {
+			return
+		}
+		seen[d] = true
+		domains = append(domains, d)
+	}
+	for _, ob := range getAllOutboundsOptions(options) {
+		wrapper, ok := ob.(option.OutboundTLSOptionsWrapper)
+		if !ok {
+			continue
+		}
+		tls := wrapper.TakeOutboundTLSOptions()
+		if tls == nil || tls.ECH == nil || !tls.ECH.Enabled {
+			continue
+		}
+		if tls.ECH.QueryServerName != "" {
+			add(tls.ECH.QueryServerName)
+			continue
+		}
+		add(tls.ServerName)
+	}
+	return domains
 }
 
 func getDNSServerOptions(tag string, dnsurl string, domain_resolver string, detour string) (*option.DNSServerOptions, error) {
