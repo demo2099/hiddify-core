@@ -456,20 +456,13 @@ func setInbound(options *option.Options, hopt *HiddifyOptions) {
 
 			Options: &opts,
 		}
-		// switch hopt.IPv6Mode {
-		// case option.DomainStrategy(dns.DomainStrategyUseIPv4):
-		// 	opts.Address = []netip.Prefix{
-		// 		netip.MustParsePrefix("172.19.0.1/28"),
-		// 	}
-		// case option.DomainStrategy(dns.DomainStrategyUseIPv6):
-		// 	opts.Address = []netip.Prefix{
-		// 		netip.MustParsePrefix("fdfe:dcba:9876::1/126"),
-		// 	}
-		// default:
-
-		// }
 		opts.Address = []netip.Prefix{netip.MustParsePrefix("172.19.0.1/28")}
-		if ipv6Enable {
+		// Honor the user's IPv6 preference. When IPv6 is explicitly disabled
+		// (ipv4_only) keep the TUN IPv4-only; otherwise enable the IPv6 address
+		// only when the device reports IPv6 support. This prevents IPv6 traffic
+		// from leaking directly to the underlying interface when there is no
+		// working IPv6 connectivity (e.g. Google over IPv6 -> outbound/direct).
+		if hopt.IPv6Mode != option.DomainStrategy("ipv4_only") && ipv6Enable {
 			opts.Address = append(opts.Address, netip.MustParsePrefix("fdfe:dcba:9876::1/126"))
 		}
 
@@ -980,6 +973,7 @@ func setRoutingOptions(options *option.Options, hopt *HiddifyOptions) error {
 	options.Route = &option.RouteOptions{
 		Rules:               routeRules,
 		Final:               OutboundMainDetour,
+		DomainStrategy:      hopt.IPv6Mode,
 		AutoDetectInterface: (!C.IsAndroid && !C.IsIos) && (hopt.EnableTun || hopt.EnableTunService),
 		DefaultDomainResolver: &option.DomainResolveOptions{
 			Server:   DNSMultiDirectTag,
