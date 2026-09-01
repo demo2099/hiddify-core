@@ -16,6 +16,7 @@ import (
 	mDNS "github.com/miekg/dns"
 	C "github.com/sagernet/sing-box/constant"
 	sdns "github.com/sagernet/sing-box/dns"
+	singdns "github.com/sagernet/sing-dns"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/wireguard-go/hiddify"
@@ -462,7 +463,7 @@ func setInbound(options *option.Options, hopt *HiddifyOptions) {
 		// only when the device reports IPv6 support. This prevents IPv6 traffic
 		// from leaking directly to the underlying interface when there is no
 		// working IPv6 connectivity (e.g. Google over IPv6 -> outbound/direct).
-		if hopt.IPv6Mode != option.DomainStrategy(sdns.DomainStrategyUseIPv4) && ipv6Enable {
+		if hopt.IPv6Mode != option.DomainStrategy(singdns.DomainStrategyUseIPv4) && ipv6Enable {
 			opts.Address = append(opts.Address, netip.MustParsePrefix("fdfe:dcba:9876::1/126"))
 		}
 
